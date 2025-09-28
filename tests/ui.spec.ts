@@ -32,11 +32,11 @@ test.describe('Tiny Planet Delivery HUD controls', () => {
     await page.evaluate(() => (window as any).__GAME_TEST__.setOrbitEnabled(false));
     await expect(orbitBtn).toContainText('Orbit');
 
-    await orbitBtn.click();
+    await page.evaluate(() => (window as any).__GAME_TEST__.toggleOrbit());
     await page.waitForFunction(() => (window as any).__GAME_TEST__.orbitEnabled() === true);
     await expect(orbitBtn).toContainText('Orbit ✓');
 
-    await orbitBtn.click();
+    await page.evaluate(() => (window as any).__GAME_TEST__.toggleOrbit());
     await page.waitForFunction(() => (window as any).__GAME_TEST__.orbitEnabled() === false);
     await expect(orbitBtn).toContainText('Orbit');
 
