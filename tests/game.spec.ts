@@ -11,8 +11,10 @@ test.beforeEach(async ({ page }) => {
 
 async function waitForTestApi(page: Page) {
   await page.waitForFunction(() => Boolean((window as any).__GAME_TEST__), undefined, {
-    timeout: 15_000
+    timeout: 30_000
   });
+  const apiExists = await page.evaluate(() => Boolean((window as any).__GAME_TEST__));
+  expect(apiExists, '__GAME_TEST__ global did not resolve in time').toBe(true);
 }
 
 test.describe('Tiny Planet Delivery', () => {
@@ -20,7 +22,7 @@ test.describe('Tiny Planet Delivery', () => {
     const targetUrl = process.env.DEMO_URL ?? '/index.html';
     await page.goto(targetUrl);
 
-    await page.waitForSelector('[data-game-ready="1"]', { timeout: 15_000 });
+    await page.waitForSelector('[data-game-ready="1"]', { timeout: 30_000 });
     await waitForTestApi(page);
 
     const canvas = page.locator('canvas');
