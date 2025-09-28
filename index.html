@@ -614,7 +614,8 @@
       // input to desired tangential acceleration relative to camera
       const up = getUp();
       camera.getWorldDirection(tmpVec);
-      tmpVec.negate(); // forward should be away from the camera
+      // Use the camera's forward vector to align player movement with what the
+      // player sees (no negation keeps W = forward relative to the lens).
       buildSurfaceBasis(up, tmpVec, surfaceForward, surfaceRight);
 
       moveVec.set(0,0,0)
