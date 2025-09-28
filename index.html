@@ -548,9 +548,17 @@
     // jump button
     document.getElementById('jumpBtn').addEventListener('click', ()=>{ input.jump=true; userAudioInit(); });
 
+    function updateOrbitButton(){
+      const enabled = controls.enabled;
+      orbitBtn.textContent = enabled ? 'Orbit On ✓' : 'Orbit';
+      orbitBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    }
+
+    updateOrbitButton();
+
     orbitBtn.addEventListener('click', ()=>{
       controls.enabled = !controls.enabled;
-      orbitBtn.textContent = controls.enabled ? 'Orbit ✓' : 'Orbit';
+      updateOrbitButton();
     });
 
     // ---------- Simple physics on a sphere ----------
