@@ -787,11 +787,13 @@
       for (let j=bursts.length-1;j>=0;j--){
         const pts = bursts[j];
         const positions = pts.geometry.attributes.position.array;
-        const velos = pts.geometry.attributes.position.userVelocities || (()=>{
-          pts.geometry.attributes.position.userVelocities = new Float32Array(positions.length);
-          for (let k=0;k<velos.length;k++) velos[k]=0;
-          return pts.geometry.attributes.position.userVelocities;
-        })();
+        let velos = pts.geometry.attributes.position.userVelocities;
+        if (!velos) {
+          const newVelos = new Float32Array(positions.length);
+          newVelos.fill(0);
+          pts.geometry.attributes.position.userVelocities = newVelos;
+          velos = newVelos;
+        }
       }
       // simpler: store vel on object
       bursts.forEach((pts, bi)=>{
