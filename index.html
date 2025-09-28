@@ -567,25 +567,67 @@
     const accel = 9.5;
     const maxSpeed = 6.0;
     const friction = 6.0;
-    const airFriction = 1.0;
-    const gravity = 9.8 * 0.35;
+    const airFriction = 8.0;
+    const gravity = 9.8 + 0.3;
     let carry = null; // Sprite attached when carrying
 
+    const surfaceForward = new THREE.Vector3();
+    const surfaceRight = new THREE.Vector3();
+    const moveVec = new THREE.Vector3();
+    const accelVec = new THREE.Vector3();
+    const orientForward = new THREE.Vector3();
+    const heading = new THREE.Vector3(0,0,1);
+    const tmpVec = new THREE.Vector3();
+    const tmpVec2 = new THREE.Vector3();
+    const desiredCamPos = new THREE.Vector3();
+    const lookTarget = new THREE.Vector3();
+    const carryAnchor = new THREE.Vector3();
+    const WORLD_FORWARD = new THREE.Vector3(0,0,1);
+    const WORLD_RIGHT = new THREE.Vector3(1,0,0);
+    const origin = new THREE.Vector3(0,0,0);
+    const lookMatrix = new THREE.Matrix4();
+
     function getUp() { return player.position.clone().normalize(); }
+
+    function buildSurfaceBasis(normal, reference, outForward, outRight){
+      outForward.copy(reference);
+      outForward.projectOnPlane(normal);
+      if (outForward.lengthSq() < 1e-6){
+        outForward.copy(tmpVec.copy(WORLD_FORWARD).projectOnPlane(normal));
+        if (outForward.lengthSq() < 1e-6){
+          outForward.copy(tmpVec.copy(WORLD_RIGHT).projectOnPlane(normal));
+        }
+      }
+      outForward.normalize();
+
+      outRight.crossVectors(normal, outForward);
+      if (outRight.lengthSq() < 1e-6){
+        outRight.crossVectors(normal, WORLD_RIGHT);
+        if (outRight.lengthSq() < 1e-6){
+          outRight.crossVectors(normal, WORLD_FORWARD);
+        }
+      }
+      outRight.normalize();
+    }
 
     function updatePhysics(dt){
       // input to desired tangential acceleration relative to camera
       const up = getUp();
-      // basis vectors on tangent plane from camera
-      const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
-      camDir.projectOnPlane(up).normalize();
-      if (camDir.lengthSq() < 1e-6) camDir.set(0,0,1);
-      const right = new THREE.Vector3().crossVectors(camDir, up).normalize();
-      const move = new THREE.Vector3().addScaledVector(camDir, input.y).addScaledVector(right, input.x);
-      if (move.lengthSq()>0) move.normalize();
+      camera.getWorldDirection(tmpVec);
+      tmpVec.negate(); // forward should be away from the camera
+      buildSurfaceBasis(up, tmpVec, surfaceForward, surfaceRight);
 
+      moveVec.set(0,0,0)
+        .addScaledVector(surfaceForward, input.y)
+        .addScaledVector(surfaceRight, input.x);
+      if (moveVec.lengthSq() > 1e-6) {
+        moveVec.normalize();
+      } else {
+        moveVec.set(0,0,0);
+      }
+
+      accelVec.copy(moveVec).multiplyScalar(accel);
       const grounded = player.position.length() <= (PLANET_R + 0.5 + 1e-3);
-      const accelVec = move.multiplyScalar(accel);
       const curFriction = grounded ? friction : airFriction;
 
       vel.addScaledVector(accelVec, dt);
@@ -616,9 +658,16 @@
       input.jump = false;
 
       // orient player: up to normal, face velocity or look at post if nearly stopped
-      const forward = vel.lengthSq()>0.0004 ? vel.clone().normalize() : postNormal.clone().cross(up).normalize();
-      const m = new THREE.Matrix4().lookAt(new THREE.Vector3(), forward, up);
-      player.quaternion.setFromRotationMatrix(m);
+      orientForward.copy(vel);
+      if (orientForward.lengthSq() > 0.0004){
+        orientForward.normalize();
+      } else {
+        orientForward.copy(surfaceForward);
+      }
+      heading.copy(orientForward);
+      tmpVec2.copy(orientForward);
+      lookMatrix.lookAt(origin, tmpVec2, up);
+      player.quaternion.setFromRotationMatrix(lookMatrix);
 
       // bobbing / idle bounce
       body.position.y = Math.sin(perf.now*0.002)*0.02;
@@ -628,13 +677,20 @@
     // ---------- Camera follow ----------
     function updateCamera(dt){
       const up = getUp();
-      const forward = vel.lengthSq()>0.01 ? vel.clone().normalize() : postNormal.clone().cross(up).normalize();
-      const back = forward.clone().multiplyScalar(-1);
-      const desired = player.position.clone()
+      tmpVec.copy(heading);
+      if (tmpVec.lengthSq() < 1e-6){
+        const ref = surfaceForward.lengthSq() > 0 ? surfaceForward : WORLD_FORWARD;
+        buildSurfaceBasis(up, ref, tmpVec, tmpVec2);
+      } else {
+        tmpVec.normalize();
+      }
+      tmpVec2.copy(tmpVec).multiplyScalar(-1);
+      desiredCamPos.copy(player.position)
         .addScaledVector(up, 2.0)
-        .addScaledVector(back, 4.5);
-      camera.position.lerp(desired, 1.0 - Math.pow(0.0001, dt));
-      camera.lookAt(player.position.clone().addScaledVector(up, 0.4));
+        .addScaledVector(tmpVec2, 4.5);
+      camera.position.lerp(desiredCamPos, 1.0 - Math.pow(0.0001, dt));
+      lookTarget.copy(player.position).addScaledVector(up, 0.4);
+      camera.lookAt(lookTarget);
       controls.target.copy(player.position);
       controls.update();
       if (bokehPass){
@@ -891,10 +947,13 @@
       if (!carry) return;
       // stick to player's satchel area
       const up = getUp();
-      const right = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0,1,0)).normalize();
-      const fwd = new THREE.Vector3().crossVectors(right, up).normalize();
-      const anchor = player.position.clone().addScaledVector(up, 0.45).addScaledVector(right, -0.4).addScaledVector(fwd, -0.1);
-      carry.position.copy(anchor);
+      const ref = heading.lengthSq() > 0 ? heading : surfaceForward;
+      buildSurfaceBasis(up, ref, tmpVec, tmpVec2);
+      carryAnchor.copy(player.position)
+        .addScaledVector(up, 0.45)
+        .addScaledVector(tmpVec2, -0.4)
+        .addScaledVector(tmpVec, -0.1);
+      carry.position.copy(carryAnchor);
       carry.material.opacity = 1.0;
       carry.scale.setScalar(0.45 + Math.sin(perf.now*0.01)*0.02);
     }
