@@ -731,6 +731,36 @@
       }
     }
 
+    // ---------- Test hooks (for automation) ----------
+    window.__GAME_TEST__ = {
+      ready: () => true,
+      quest: () => questIndex,
+      questText: () => questEl.textContent,
+      carrying: () => Boolean(carry),
+      winVisible: () => winEl.style.display === 'grid',
+      musicOn: () => musicOn,
+      orbitEnabled: () => controls.enabled,
+      tpToPost: () => {
+        vel.set(0,0,0);
+        vRad = 0;
+        player.position.copy(postNormal.clone().multiplyScalar(PLANET_R + 0.5));
+      },
+      tpToHouse: () => {
+        if (questIndex >= QUESTS.length) return;
+        const q = QUESTS[questIndex];
+        const house = houses[q.targetIdx % houses.length];
+        vel.set(0,0,0);
+        vRad = 0;
+        player.position.copy(house.normal.clone().multiplyScalar(PLANET_R + 0.5));
+      },
+      clickInteract: () => tryInteract(),
+      toggleMusic: () => muteBtn.click(),
+      setMusicEnabled: (on = true) => { if (musicOn !== on) muteBtn.click(); },
+      toggleOrbit: () => orbitBtn.click(),
+      setOrbitEnabled: (enabled = true) => { if (controls.enabled !== enabled) orbitBtn.click(); },
+      reset: () => resetGame(false)
+    };
+
     // ---------- Blossom animation & bursts update ----------
     function updateParticles(dt){
       // petals drift subtly and orbit planet
@@ -799,8 +829,8 @@
     function userAudioInit(){
       if (audioCtx) return;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      startMusic();
-      muteBtn.textContent = '♪ Music ✓';
+      if (musicOn){ startMusic(); }
+      muteBtn.textContent = musicOn ? '♪ Music ✓' : '♪ Music ✕';
     }
     function startMusic(){
       if (!audioCtx) return;
@@ -845,6 +875,7 @@
     const clock = new THREE.Clock();
     const perf = { now: 0 };
     startQuest();
+    document.body.setAttribute('data-game-ready','1');
 
     function updateCarry(){
       if (!carry) return;
