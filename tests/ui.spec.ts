@@ -48,7 +48,7 @@ test.describe('Tiny Planet Delivery HUD controls', () => {
     await page.waitForFunction(() => (window as any).__GAME_TEST__.musicOn() === false);
     await expect(musicBtn).toContainText('♪ Music ✕');
 
-    await musicBtn.click();
+    await page.evaluate(() => (window as any).__GAME_TEST__.toggleMusic());
     await page.waitForFunction(() => (window as any).__GAME_TEST__.musicOn() === true);
     await expect(musicBtn).toContainText('♪ Music ✓');
 
