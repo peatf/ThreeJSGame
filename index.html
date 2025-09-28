@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Messenger: Tiny Planet Delivery (Three.js Demo)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <style>
+    :root{
+      --pink:#FFB6C1; --sky:#87CEEB; --green:#90EE90; --warm:#FFFACD; --shadow:#b19cd9;
+    }
+    html, body { margin:0; height:100%; background:#f7f5ff; font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
+    #wrap { display:flex; align-items:center; justify-content:center; height:100%; }
+    #game { width:80vw; height:80vh; max-width:1200px; max-height:800px; position:relative; border-radius:16px; box-shadow: 0 20px 60px rgba(80,60,140,0.25); overflow:hidden; background:linear-gradient(180deg, #fce1ff 0%, #fff6e8 100%); }
+    #overlay {
+      position:absolute; inset:0; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between;
+    }
+    .hud {
+      display:flex; gap:12px; padding:10px; align-items:center; pointer-events:auto;
+    }
+    #topbar { justify-content:space-between; }
+    .pill {
+      background:rgba(255,255,255,0.75); backdrop-filter: blur(6px);
+      border:1px solid rgba(0,0,0,0.05); padding:8px 10px; border-radius:12px; font-size:12px;
+      box-shadow: 0 6px 16px rgba(100,80,160,0.15);
+    }
+    #quest { font-weight:600; color:#5a3f9c; }
+    #hint { color:#5a3f9c; opacity:0.8; }
+    #win {
+      position:absolute; inset:0; display:none; place-items:center; background:radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.7), rgba(255,255,255,0.2));
+      pointer-events:auto;
+    }
+    #win .card {
+      background:white; border-radius:16px; padding:22px 20px; text-align:center; width:min(460px, 90%); 
+      box-shadow: 0 20px 60px rgba(80,60,140,0.2); border:1px solid rgba(0,0,0,0.06);
+    }
+    button {
+      appearance:none; border:0; border-radius:12px; padding:10px 14px; font-weight:600; cursor:pointer;
+      background:#7b6df0; color:white; box-shadow: 0 8px 18px rgba(123,109,240,0.35);
+    }
+    button.alt { background:#ffd36b; color:#473400; box-shadow: 0 8px 18px rgba(255,211,107,0.35); }
+    #joystick {
+      position:absolute; left:14px; bottom:14px; width:120px; height:120px; border-radius:50%;
+      background:radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9), rgba(255,255,255,0.45));
+      border:1px solid rgba(0,0,0,0.06); box-shadow:inset 0 6px 20px rgba(60,40,120,0.08);
+      pointer-events:auto; touch-action:none; user-select:none;
+    }
+    #stick {
+      position:absolute; left:50%; top:50%; width:56px; height:56px; margin-left:-28px; margin-top:-28px; border-radius:50%;
+      background:linear-gradient(180deg, #fff, #f0eaff); border:1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 8px 18px rgba(60,40,120,0.18), inset 0 6px 12px rgba(255,255,255,0.8);
+    }
+    #jumpBtn {
+      position:absolute; right:14px; bottom:14px; width:90px; height:90px; border-radius:50%;
+      background:radial-gradient(circle at 30% 30%, #fff, #ffe8a9); border:1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 8px 18px rgba(200,160,60,0.25); pointer-events:auto; touch-action:manipulation; font-weight:700; color:#7a5a00;
+    }
+    canvas { display:block; }
+    .legend { font-size:12px; line-height:1.4; }
+    @media (max-width: 760px){
+      #game { width:100vw; height:100vh; border-radius:0; }
+      #joystick { width:140px; height:140px; }
+      #stick { width:60px; height:60px; margin-left:-30px; margin-top:-30px; }
+      #jumpBtn { width:100px; height:100px; }
+    }
+  </style>
+
+  <!-- Import map for Three.js + examples -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div id="game">
+      <div id="overlay">
+        <div id="topbar" class="hud">
+          <div class="pill legend">
+            <div><strong>Controls</strong> — Move: WASD/Arrow or drag stick • Jump: Space / tap “Jump” • Click/Tap: pick up / drop</div>
+          </div>
+          <div class="hud">
+            <button id="muteBtn" class="alt" title="Toggle music">♪ Music</button>
+            <button id="orbitBtn" class="pill" title="Toggle OrbitControls">Orbit</button>
+          </div>
+        </div>
+        <div class="hud" style="justify-content:center; margin-top:4px; pointer-events:none;">
+          <div id="quest" class="pill">Quest: —</div>
+        </div>
+        <div class="hud" style="justify-content:center; margin-bottom:8px; pointer-events:none;">
+          <div id="hint" class="pill legend">Tip: walk onto the glowing circle at the Post Office to pick up the parcel <span aria-hidden>📦</span></div>
+        </div>
+      </div>
+
+      <div id="joystick" aria-label="virtual joystick">
+        <div id="stick"></div>
+      </div>
+      <button id="jumpBtn" aria-label="jump">JUMP</button>
+
+      <div id="win">
+        <div class="card">
+          <h2>All deliveries complete!</h2>
+          <p>Great work, little messenger. The island folk are grateful. 🌸</p>
+          <div style="display:flex; gap:10px; justify-content:center; margin-top:8px;">
+            <button id="resetBtn">Play Again</button>
+            <button id="keepExploring" class="alt">Keep Exploring</button>
+          </div>
+          <p class="legend" style="margin-top:10px;">(You can wander, or reset to start a fresh set of quests.)</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+
+    // ---------- Helpers: Random, Colors, Geometry noise ----------
+    const TAU = Math.PI*2;
+    const rand = (a=1,b=0)=>Math.random()*(a-b)+b;
+    const ease = (a,b,t)=>a+(b-a)*t;
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+    function pastel(c){ return new THREE.Color(c); }
+    const COLORS = {
+      green: pastel('#90EE90'),
+      sky:   pastel('#87CEEB'),
+      pink:  pastel('#FFB6C1'),
+      warm:  pastel('#FFFACD'),
+      shadow: pastel('#b19cd9'),
+      roof:  new THREE.Color('#cf6af5'),
+      wood:  new THREE.Color('#8b6a4b'),
+      water: new THREE.Color('#9fd8ff'),
+      bird:  new THREE.Color('#fff3d1'),
+      cap:   new THREE.Color('#ff6b6b'),
+      eye:   new THREE.Color('#222')
+    };
+
+    // lightweight "fbm-like" noise using sin/cos, stable and fast
+    function softNoise3(x,y,z){
+      const s1 = Math.sin(x*2.1 + y*1.3 + z*0.7);
+      const s2 = Math.sin(x*3.7 - y*2.9 + z*1.9);
+      const s3 = Math.cos(x*1.9 + y*2.2 - z*2.5);
+      return (s1 + 0.5*s2 + 0.25*s3)*0.5; // [-~1, ~1]
+    }
+    function deformPlanetGeo(geo, amp=0.35, freq=1.8){
+      const pos = geo.attributes.position;
+      for(let i=0;i<pos.count;i++){
+        const v = new THREE.Vector3().fromBufferAttribute(pos,i);
+        const n = v.clone().normalize();
+        const d = softNoise3(n.x*freq, n.y*freq, n.z*freq);
+        const d2 = softNoise3(n.x*freq*2.3, n.y*freq*2.3, n.z*freq*2.3)*0.4;
+        const disp = (d*0.6 + d2*0.4) * amp;
+        v.addScaledVector(n, disp);
+        pos.setXYZ(i, v.x, v.y, v.z);
+      }
+      geo.computeVertexNormals();
+    }
+
+    function makeTextSprite(text, options={}){
+      const { font='600 14px ui-sans-serif, system-ui', fill='#5a3f9c', padding=8, bg='rgba(255,255,255,0.8)', radius=10 } = options;
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.canvas.width = 512; ctx.canvas.height = 128;
+      ctx.font = font; ctx.textBaseline='middle';
+      const metrics = ctx.measureText(text);
+      const w = Math.min(440, metrics.width + padding*2);
+      // draw rounded rect
+      function rrect(x,y,w,h,r){ ctx.beginPath();
+        ctx.moveTo(x+r,y); ctx.arcTo(x+w,y, x+w,y+h, r);
+        ctx.arcTo(x+w,y+h, x, y+h, r); ctx.arcTo(x,y+h, x, y, r); ctx.arcTo(x,y, x+w, y, r); ctx.closePath();
+      }
+      ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+      ctx.fillStyle = bg; rrect(20,32, w, 64, radius); ctx.fill();
+      ctx.fillStyle = fill; ctx.fillText(text, 20+padding, 64);
+      const tex = new THREE.CanvasTexture(ctx.canvas); tex.minFilter = THREE.LinearFilter;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false });
+      const spr = new THREE.Sprite(mat);
+      spr.scale.set( w/64, 64/64, 1 );
+      return spr;
+    }
+
+    function makeCircleTexture(hex='#ffffff'){
+      const c = document.createElement('canvas'); c.width=c.height=64;
+      const g = c.getContext('2d');
+      const grd = g.createRadialGradient(32,32,2, 32,32,32);
+      grd.addColorStop(0, hex); grd.addColorStop(1,'rgba(255,255,255,0)');
+      g.fillStyle=grd; g.beginPath(); g.arc(32,32,32,0,TAU); g.fill();
+      const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter;
+      return tex;
+    }
+
+    function makePetalTexture(){
+      const c = document.createElement('canvas'); c.width=c.height=64;
+      const g = c.getContext('2d');
+      g.clearRect(0,0,64,64);
+      g.translate(32,38); g.rotate(-0.3);
+      g.fillStyle='#ffc9dc';
+      g.beginPath();
+      g.moveTo(0,-28); g.bezierCurveTo(16,-20, 16,6, 0,14); g.bezierCurveTo(-16,6, -16,-20, 0,-28);
+      g.closePath(); g.fill();
+      const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter;
+      return tex;
+    }
+
+    // ---------- Scene setup ----------
+    const container = document.getElementById('game');
+    const questEl = document.getElementById('quest');
+    const winEl = document.getElementById('win');
+    const resetBtn = document.getElementById('resetBtn');
+    const keepExploringBtn = document.getElementById('keepExploring');
+    const muteBtn = document.getElementById('muteBtn');
+    const orbitBtn = document.getElementById('orbitBtn');
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0xf6e9ff, 18, 36);
+
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth/container.clientHeight, 0.1, 200);
+    camera.position.set(0, 6, 14);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.enabled = false; controls.maxDistance = 40; controls.minDistance=8;
+
+    // Sky dome gradient
+    const skyGeo = new THREE.SphereGeometry(80, 32, 16);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms:{
+        topColor: { value: new THREE.Color('#ffd1a8') },
+        bottomColor: { value: new THREE.Color('#e8d7ff') },
+        offset: { value: 10 },
+        exponent: { value: 0.6 }
+      },
+      vertexShader: `
+      varying vec3 vWorldPos;
+      void main(){
+        vec4 worldPosition = modelMatrix * vec4(position,1.0);
+        vWorldPos = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }`,
+      fragmentShader: `
+      uniform vec3 topColor;
+      uniform vec3 bottomColor;
+      uniform float offset;
+      uniform float exponent;
+      varying vec3 vWorldPos;
+      void main(){
+        float h = normalize(vWorldPos).y;
+        float f = max(pow(max(h+offset*0.0, 0.0), exponent), 0.0);
+        vec3 col = mix(bottomColor, topColor, f*0.7 + 0.3);
+        gl_FragColor = vec4(col, 1.0);
+      }`
+    });
+    const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
+
+    // Lights
+    const hemi = new THREE.HemisphereLight(0xffeed6, 0xbba7f0, 0.9);
+    scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffdcb1, 1.0);
+    dir.position.set(6,8,2); dir.castShadow = false; scene.add(dir);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+
+    // Postprocessing
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera); composer.addPass(renderPass);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(container.clientWidth, container.clientHeight), 0.7, 0.8, 0.4);
+    composer.addPass(bloom);
+    const enableDOF = !/iPhone|Android|Mobile|iPad/i.test(navigator.userAgent);
+    let bokehPass = null;
+    if (enableDOF){
+      bokehPass = new BokehPass(scene, camera, { focus: 18.0, aperture: 0.00008, maxblur: 0.003, width: container.clientWidth, height: container.clientHeight });
+      composer.addPass(bokehPass);
+    }
+
+    // ---------- Planet ----------
+    const PLANET_R = 10.0;
+    const planetGeo = new THREE.IcosahedronGeometry(PLANET_R, 6);
+    deformPlanetGeo(planetGeo, 0.35, 2.0);
+    const planetMat = new THREE.MeshStandardMaterial({
+      color: COLORS.green, roughness:0.9, metalness:0.0, flatShading:false
+    });
+    const planet = new THREE.Mesh(planetGeo, planetMat);
+    scene.add(planet);
+
+    // ---------- Environment: ponds, lantern paths, cherry trees ----------
+    const groupEnv = new THREE.Group(); scene.add(groupEnv);
+
+    function addPond(normal, radius=1.2){
+      const pos = normal.clone().multiplyScalar(PLANET_R - 0.02);
+      const geometry = new THREE.CircleGeometry(radius, 32);
+      geometry.rotateX(-Math.PI/2);
+      const mat = new THREE.MeshStandardMaterial({
+        color: COLORS.water, roughness:0.15, metalness:0.1, transparent:true, opacity:0.85, side:THREE.DoubleSide
+      });
+      const m = new THREE.Mesh(geometry, mat);
+      // orient the circle to sit flush to the planet surface
+      const up = new THREE.Vector3(0,1,0);
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), normal.clone().normalize());
+      m.quaternion.copy(q);
+      m.position.copy(pos);
+      groupEnv.add(m);
+    }
+
+    function addLanternLine(originNormal, count=8, arc=0.6){
+      const baseDir = new THREE.Vector3().randomDirection();
+      for(let i=0;i<count;i++){
+        const t = i/(count-1) - 0.5;
+        const greatCircleAxis = baseDir.clone().cross(originNormal).normalize();
+        const rot = new THREE.Quaternion().setFromAxisAngle(greatCircleAxis, t*arc);
+        const n = originNormal.clone().applyQuaternion(rot).normalize();
+        addLantern(n);
+      }
+    }
+
+    function addLantern(normal){
+      const basePos = normal.clone().multiplyScalar(PLANET_R + 0.02);
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), normal.clone().normalize());
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04,0.05,0.8, 6),
+        new THREE.MeshStandardMaterial({ color: COLORS.wood, roughness:0.7 })
+      );
+      pole.position.copy(basePos).addScaledVector(normal, 0.4);
+      pole.quaternion.copy(q);
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 12, 12),
+        new THREE.MeshStandardMaterial({ color: COLORS.warm, emissive: COLORS.warm, emissiveIntensity: 1.2, roughness:0.6 })
+      );
+      glow.position.copy(basePos).addScaledVector(normal, 0.86);
+      scene.add(pole, glow);
+    }
+
+    function addTree(normal){
+      const basePos = normal.clone().multiplyScalar(PLANET_R + 0.02);
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), normal.clone().normalize());
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1,0.12,1.0, 6),
+        new THREE.MeshStandardMaterial({ color: COLORS.wood, roughness:0.8 })
+      );
+      trunk.position.copy(basePos).addScaledVector(normal, 0.5);
+      trunk.quaternion.copy(q);
+      const blossomMat = new THREE.MeshStandardMaterial({ color: COLORS.pink, roughness:0.9, emissive: new THREE.Color('#ffd8ea'), emissiveIntensity:0.25 });
+      for(let i=0;i<3;i++){
+        const b = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), blossomMat);
+        b.position.copy(basePos)
+          .addScaledVector(normal, 1.0 + rand(0.0, 0.2))
+          .add(new THREE.Vector3().randomDirection().multiplyScalar(0.25));
+        scene.add(b);
+      }
+      scene.add(trunk);
+    }
+
+    // Scatter trees & ponds
+    for(let i=0;i<26;i++){
+      const n = new THREE.Vector3().randomDirection();
+      if (n.y < -0.3) continue; // leave bottom less dense
+      addTree(n);
+      if (i%6===0) addPond(n, rand(0.8,1.4));
+    }
+
+    // ---------- Player (bird) ----------
+    const player = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 20, 20), new THREE.MeshStandardMaterial({ color: COLORS.bird, roughness:0.6, metalness:0.0 }));
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.3, 20, 20), new THREE.MeshStandardMaterial({ color: new THREE.Color('#ffffff'), roughness:0.5 }));
+    belly.position.set(0, -0.05, 0.15);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.16, 12), new THREE.MeshStandardMaterial({ color: new THREE.Color('#ffbf69'), roughness:0.5 }));
+    beak.rotation.x = Math.PI/2; beak.position.set(0,0.02,0.4);
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8,8), new THREE.MeshStandardMaterial({ color: COLORS.eye }));
+    const eyeR = eyeL.clone(); eyeL.position.set(-0.13,0.12,0.28); eyeR.position.set(0.13,0.12,0.28);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16,16, 0,TAU, 0, Math.PI/2), new THREE.MeshStandardMaterial({ color: COLORS.cap, roughness:0.7, emissive:new THREE.Color('#ff7c7c'), emissiveIntensity:0.15 }));
+    cap.position.set(0,0.24,0.05); cap.rotation.x = -0.2;
+    const strap = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.02, 8, 24, Math.PI/2), new THREE.MeshStandardMaterial({ color:new THREE.Color('#7b5836'), roughness:0.9 }));
+    strap.rotation.set(Math.PI/2, 0.6, 0); strap.position.y = -0.05;
+    const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.16,0.08), new THREE.MeshStandardMaterial({ color:new THREE.Color('#a37a4b'), roughness:0.8 }));
+    satchel.position.set(-0.22, -0.05, -0.02); satchel.rotation.y = 0.3;
+
+    player.add(body, belly, beak, eyeL, eyeR, cap, strap, satchel);
+    scene.add(player);
+
+    // Initial player position
+    const startNormal = new THREE.Vector3(0,1,0).normalize();
+    let radial = PLANET_R + 0.5; // include player height offset
+    player.position.copy(startNormal).multiplyScalar(radial);
+
+    // ---------- Post Office ----------
+    function makePagoda(normal, colorBase = new THREE.Color('#ffe4a3')) {
+      const g = new THREE.Group();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), normal.clone().normalize());
+      const basePos = normal.clone().multiplyScalar(PLANET_R + 0.02);
+      function level(y, w, h, roof=true){
+        const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, w, 1,1,1).toNonIndexed(), new THREE.MeshStandardMaterial({ color: colorBase, roughness:0.8 }));
+        body.position.y = y;
+        g.add(body);
+        if (roof){
+          const r = new THREE.Mesh(new THREE.ConeGeometry(w*0.75, h*0.6, 4), new THREE.MeshStandardMaterial({ color: COLORS.roof, roughness:0.9, emissive:new THREE.Color('#e6baff'), emissiveIntensity:0.2 }));
+          r.position.y = y + h*0.5 + (h*0.3)*0.5;
+          r.rotation.y = Math.PI/4;
+          g.add(r);
+        }
+      }
+      level(0.25, 0.9, 0.35, true);
+      level(0.70, 0.7, 0.3, true);
+      level(1.05, 0.5, 0.26, false);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12,12), new THREE.MeshStandardMaterial({ color: COLORS.warm, emissive: COLORS.warm, emissiveIntensity: 1.5 }));
+      lamp.position.set(0,1.1,0.6);
+      g.add(lamp);
+      g.position.copy(basePos).addScaledVector(normal, 0.6);
+      g.quaternion.copy(q);
+      return g;
+    }
+
+    const postNormal = startNormal.clone();
+    const postOffice = makePagoda(postNormal, new THREE.Color('#fff3b2'));
+    scene.add(postOffice);
+
+    // Glowing pickup circle at post office
+    const pickupCircle = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.06, 12, 64), new THREE.MeshStandardMaterial({
+      color: COLORS.warm, emissive: COLORS.warm, emissiveIntensity: 1.2, transparent:true, opacity:0.9
+    }));
+    pickupCircle.position.copy(postNormal).multiplyScalar(PLANET_R + 0.05);
+    pickupCircle.lookAt(new THREE.Vector3(0,0,0));
+    scene.add(pickupCircle);
+
+    // Lantern path from post office
+    addLanternLine(postNormal, 8, 0.5);
+
+    // ---------- Houses (targets) ----------
+    const houseNormals = [];
+    const houses = [];
+    const houseNames = ["Elder's House", "Tea House", "Lantern Inn", "Koi Pond Home", "Blossom Cottage"];
+    for (let i=0;i<4;i++){
+      let n = new THREE.Vector3().randomDirection();
+      if (n.dot(postNormal) > 0.5) { i--; continue; } // spread out
+      if (n.y < -0.5) { i--; continue; }
+      const H = makePagoda(n, new THREE.Color('#ffe7f3'));
+      scene.add(H);
+      houses.push({ group:H, normal:n, name: houseNames[i%houseNames.length] });
+      houseNormals.push(n);
+      addLanternLine(n, 6, 0.45);
+    }
+
+    // ---------- Parcels & Particle effects ----------
+    const parcelTex = makeCircleTexture('#ffffff');
+    const parcelMat = new THREE.SpriteMaterial({ map: parcelTex, color:0xffffff, depthWrite:false, transparent:true });
+    function createParcelAtNormal(normal){
+      const s = new THREE.Sprite(parcelMat.clone());
+      s.material.color = new THREE.Color('#ffffff');
+      s.material.opacity = 0.95;
+      s.position.copy(normal.clone().multiplyScalar(PLANET_R + 0.9));
+      s.scale.set(0.7,0.7,0.7);
+      s.userData.normal = normal.clone();
+      scene.add(s);
+      return s;
+    }
+    let activeParcel = null;
+
+    // Success sparkle burst
+    const bursts = [];
+    function spawnBurst(posWorld){
+      const count = 120;
+      const geom = new THREE.BufferGeometry();
+      const positions = new Float32Array(count*3);
+      const velocities = new Float32Array(count*3);
+      for (let i=0;i<count;i++){
+        const dir = new THREE.Vector3().randomDirection();
+        positions.set([posWorld.x, posWorld.y, posWorld.z], i*3);
+        velocities.set([dir.x*rand(2.0,4.0), dir.y*rand(2.0,4.0), dir.z*rand(2.0,4.0)], i*3);
+      }
+      geom.setAttribute('position', new THREE.BufferAttribute(positions,3));
+      const mat = new THREE.PointsMaterial({ size:0.15, transparent:true, opacity:1.0, map: makeCircleTexture('#fff7d1'), depthWrite:false, blending:THREE.AdditiveBlending });
+      const pts = new THREE.Points(geom, mat);
+      pts.userData = { life: 0 };
+      bursts.push(pts); scene.add(pts);
+    }
+
+    // Ambient blossom particles
+    const petalTex = makePetalTexture();
+    const petalCount = 600;
+    const petalGeom = new THREE.BufferGeometry();
+    const petalPos = new Float32Array(petalCount*3);
+    const petalVel = new Float32Array(petalCount*3);
+    for (let i=0;i<petalCount;i++){
+      const n = new THREE.Vector3().randomDirection();
+      const r = PLANET_R + rand(0.8, 2.4);
+      const p = n.multiplyScalar(r);
+      petalPos.set([p.x,p.y,p.z], i*3);
+      const drift = new THREE.Vector3().randomDirection().multiplyScalar(0.2);
+      petalVel.set([drift.x, drift.y, drift.z], i*3);
+    }
+    petalGeom.setAttribute('position', new THREE.BufferAttribute(petalPos,3));
+    const petalMat = new THREE.PointsMaterial({ size:0.18, transparent:true, opacity:0.85, map: petalTex, depthWrite:false });
+    const petals = new THREE.Points(petalGeom, petalMat); scene.add(petals);
+
+    // ---------- Input ----------
+    const input = { x:0, y:0, jump:false, click:false };
+    const keys = {};
+    window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ e.preventDefault(); input.jump=true; }});
+    window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+    renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+    function onPointerDown(e){
+      userAudioInit();
+      // click to pick/drop
+      tryInteract();
+    }
+
+    // virtual joystick
+    const joy = document.getElementById('joystick');
+    const stick = document.getElementById('stick');
+    let joyActive = false, joyId = null;
+    function joyPosFromEvent(e){
+      const rect = joy.getBoundingClientRect();
+      const x = ( (e.touches? e.touches[0].clientX : e.clientX) - rect.left ) / rect.width;
+      const y = ( (e.touches? e.touches[0].clientY : e.clientY) - rect.top ) / rect.height;
+      return { x: x*2-1, y: y*2-1 };
+    }
+    function setStick(dx,dy){
+      const r = 38; stick.style.transform=`translate(${dx*r}px, ${dy*r}px)`;
+    }
+    joy.addEventListener('pointerdown', e=>{
+      joyActive = true; joyId = e.pointerId; joy.setPointerCapture(joyId);
+      const p = joyPosFromEvent(e); input.x = clamp(p.x, -1,1); input.y = clamp(-p.y, -1,1);
+      setStick(input.x, -input.y);
+    });
+    joy.addEventListener('pointermove', e=>{
+      if (!joyActive) return;
+      const p = joyPosFromEvent(e);
+      input.x = clamp(p.x, -1,1); input.y = clamp(-p.y, -1,1);
+      setStick(input.x, -input.y);
+    });
+    joy.addEventListener('pointerup', e=>{
+      joyActive = false; input.x=0; input.y=0; setStick(0,0);
+    });
+
+    // jump button
+    document.getElementById('jumpBtn').addEventListener('click', ()=>{ input.jump=true; userAudioInit(); });
+
+    orbitBtn.addEventListener('click', ()=>{
+      controls.enabled = !controls.enabled;
+      orbitBtn.textContent = controls.enabled ? 'Orbit ✓' : 'Orbit';
+    });
+
+    // ---------- Simple physics on a sphere ----------
+    const vel = new THREE.Vector3(); // tangential
+    let vRad = 0.0; // radial (jump)
+    const accel = 9.5;
+    const maxSpeed = 6.0;
+    const friction = 6.0;
+    const airFriction = 1.0;
+    const gravity = 9.8 * 0.35;
+    let carry = null; // Sprite attached when carrying
+
+    function getUp() { return player.position.clone().normalize(); }
+
+    function updatePhysics(dt){
+      // input to desired tangential acceleration relative to camera
+      const up = getUp();
+      // basis vectors on tangent plane from camera
+      const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
+      camDir.projectOnPlane(up).normalize();
+      if (camDir.lengthSq() < 1e-6) camDir.set(0,0,1);
+      const right = new THREE.Vector3().crossVectors(camDir, up).normalize();
+      const move = new THREE.Vector3().addScaledVector(camDir, input.y).addScaledVector(right, input.x);
+      if (move.lengthSq()>0) move.normalize();
+
+      const grounded = player.position.length() <= (PLANET_R + 0.5 + 1e-3);
+      const accelVec = move.multiplyScalar(accel);
+      const curFriction = grounded ? friction : airFriction;
+
+      vel.addScaledVector(accelVec, dt);
+      const speed = vel.length();
+      if (speed > maxSpeed) vel.multiplyScalar(maxSpeed/speed);
+      // project velocity to tangent plane
+      vel.projectOnPlane(up);
+      // friction
+      const fr = Math.max(0, 1 - curFriction*dt);
+      vel.multiplyScalar(fr);
+
+      // integrate tangential
+      player.position.addScaledVector(vel, dt);
+
+      // radial (jump / gravity)
+      vRad -= gravity * dt;
+      const currentLen = player.position.length();
+      const targetLen = PLANET_R + 0.5 + vRad*dt;
+      const dir = player.position.clone().normalize();
+      const newLen = Math.max(targetLen, PLANET_R + 0.5);
+      player.position.copy(dir.multiplyScalar(newLen));
+      if (newLen <= PLANET_R + 0.5 && vRad < 0) vRad = 0; // landed
+
+      // jump trigger
+      if (input.jump && grounded){
+        vRad = 3.2;
+      }
+      input.jump = false;
+
+      // orient player: up to normal, face velocity or look at post if nearly stopped
+      const forward = vel.lengthSq()>0.0004 ? vel.clone().normalize() : postNormal.clone().cross(up).normalize();
+      const m = new THREE.Matrix4().lookAt(new THREE.Vector3(), forward, up);
+      player.quaternion.setFromRotationMatrix(m);
+
+      // bobbing / idle bounce
+      body.position.y = Math.sin(perf.now*0.002)*0.02;
+      cap.position.y = 0.24 + Math.sin(perf.now*0.003+1.2)*0.01;
+    }
+
+    // ---------- Camera follow ----------
+    function updateCamera(dt){
+      const up = getUp();
+      const forward = vel.lengthSq()>0.01 ? vel.clone().normalize() : postNormal.clone().cross(up).normalize();
+      const back = forward.clone().multiplyScalar(-1);
+      const desired = player.position.clone()
+        .addScaledVector(up, 2.0)
+        .addScaledVector(back, 4.5);
+      camera.position.lerp(desired, 1.0 - Math.pow(0.0001, dt));
+      camera.lookAt(player.position.clone().addScaledVector(up, 0.4));
+      controls.target.copy(player.position);
+      controls.update();
+      if (bokehPass){
+        bokehPass.materialBokeh.uniforms['focus'].value = camera.position.distanceTo(player.position)+6.0;
+      }
+    }
+
+    // ---------- Quests ----------
+    const QUESTS = [
+      { item:'Tea', targetIdx:0 },
+      { item:'Letter', targetIdx:1 },
+      { item:'Lantern', targetIdx:2 }
+    ];
+    let questIndex = 0;
+    let targetSprite = null;
+
+    function setQuestText(){
+      if (questIndex >= QUESTS.length){
+        questEl.textContent = 'All done! Enjoy the view 🌅';
+      } else {
+        const q = QUESTS[questIndex];
+        const house = houses[q.targetIdx % houses.length];
+        questEl.textContent = `Quest ${questIndex+1}/${QUESTS.length}: Deliver ${q.item} to ${house.name}`;
+      }
+    }
+
+    function spawnParcelForQuest(){
+      if (activeParcel) { scene.remove(activeParcel); activeParcel=null; }
+      activeParcel = createParcelAtNormal(postNormal);
+      activeParcel.material.color = new THREE.Color('#ffffff');
+    }
+
+    function showTargetIcon(house){
+      if (targetSprite) { scene.remove(targetSprite); targetSprite=null; }
+      targetSprite = makeTextSprite(`Deliver here → ${house.name}`, { font:'700 18px ui-sans-serif', bg:'rgba(255,250,205,0.9)' });
+      targetSprite.position.copy(house.normal.clone().multiplyScalar(PLANET_R + 2.2));
+      scene.add(targetSprite);
+    }
+
+    function startQuest(){
+      setQuestText();
+      spawnParcelForQuest();
+      const q = QUESTS[questIndex];
+      const house = houses[q.targetIdx % houses.length];
+      showTargetIcon(house);
+    }
+
+    function nextQuest(){
+      questIndex++;
+      if (questIndex >= QUESTS.length){
+        // win
+        winEl.style.display = 'grid';
+        spawnBurst(player.position.clone());
+        spawnBurst(player.position.clone().add(new THREE.Vector3(0,2,0)));
+      } else {
+        startQuest();
+      }
+    }
+
+    function resetGame(keep=false){
+      winEl.style.display = 'none';
+      questIndex = 0;
+      // reset player near post office
+      vel.set(0,0,0); vRad=0;
+      player.position.copy(postNormal.clone().multiplyScalar(PLANET_R + 0.5));
+      camera.position.set(0,6,14);
+      if (carry){ scene.remove(carry); carry=null; }
+      if (activeParcel){ scene.remove(activeParcel); activeParcel=null; }
+      if (targetSprite){ scene.remove(targetSprite); targetSprite=null; }
+      if (!keep){ startQuest(); } else { setQuestText(); }
+    }
+
+    resetBtn.addEventListener('click', ()=> resetGame(false));
+    keepExploringBtn.addEventListener('click', ()=> { winEl.style.display='none'; });
+
+    // ---------- Interactions ----------
+    function near(posWorld, normal, threshold){
+      const d = player.position.distanceTo(normal.clone().multiplyScalar(PLANET_R + 0.5));
+      return d < threshold;
+    }
+    function tryInteract(){
+      // If carrying and near target house -> deliver
+      if (carry){
+        const q = QUESTS[questIndex];
+        const house = houses[q.targetIdx % houses.length];
+        if (near(player.position, house.normal, 1.4)){
+          // delivered!
+          scene.remove(carry); carry=null;
+          spawnBurst(player.position.clone());
+          nextQuest();
+          return;
+        }
+      }
+      // If not carrying and near post office pickup circle
+      if (!carry && activeParcel && near(player.position, postNormal, 1.2)){
+        // pick up
+        carry = activeParcel; activeParcel = null;
+        // attach visually near satchel
+        carry.scale.set(0.4,0.4,0.4);
+        carry.material.opacity = 1.0;
+        spawnBurst(player.position.clone());
+      }
+    }
+
+    // ---------- Blossom animation & bursts update ----------
+    function updateParticles(dt){
+      // petals drift subtly and orbit planet
+      const pos = petals.geometry.attributes.position.array;
+      for (let i=0;i<petalCount;i++){
+        let ix = i*3;
+        let p = new THREE.Vector3(pos[ix], pos[ix+1], pos[ix+2]);
+        const r = p.length();
+        // rotate around Y a bit
+        const angle = 0.08*dt;
+        const cos= Math.cos(angle), sin=Math.sin(angle);
+        const nx = p.x*cos - p.z*sin;
+        const nz = p.x*sin + p.z*cos;
+        p.set(nx, p.y, nz);
+        // float up/down a little
+        p.add(new THREE.Vector3(0, Math.sin((perf.now*0.0005 + i)*0.2)*0.003, 0));
+        // constrain radius softly
+        p.setLength(r);
+        pos[ix]=p.x; pos[ix+1]=p.y; pos[ix+2]=p.z;
+      }
+      petals.geometry.attributes.position.needsUpdate = true;
+
+      // update bursts
+      for (let j=bursts.length-1;j>=0;j--){
+        const pts = bursts[j];
+        const positions = pts.geometry.attributes.position.array;
+        const velos = pts.geometry.attributes.position.userVelocities || (()=>{
+          pts.geometry.attributes.position.userVelocities = new Float32Array(positions.length);
+          for (let k=0;k<velos.length;k++) velos[k]=0;
+          return pts.geometry.attributes.position.userVelocities;
+        })();
+      }
+      // simpler: store vel on object
+      bursts.forEach((pts, bi)=>{
+        if (!pts.userData.vel){
+          // initialize once
+          const N = pts.geometry.attributes.position.count;
+          const buf = new Float32Array(N*3);
+          for (let i=0;i<N;i++){
+            const dir = new THREE.Vector3().randomDirection().multiplyScalar(rand(1.2,2.8));
+            buf[i*3+0]=dir.x; buf[i*3+1]=dir.y; buf[i*3+2]=dir.z;
+          }
+          pts.userData.vel = buf;
+        }
+        const pos = pts.geometry.attributes.position.array;
+        const velbuf = pts.userData.vel;
+        pts.userData.life += dt;
+        const drag = 1.0 - 0.9*dt;
+        for (let i=0;i<pos.length/3;i++){
+          velbuf[i*3+1] -= 1.5*dt;
+          velbuf[i*3+0] *= drag; velbuf[i*3+1] *= drag; velbuf[i*3+2] *= drag;
+          pos[i*3+0] += velbuf[i*3+0]*dt;
+          pos[i*3+1] += velbuf[i*3+1]*dt;
+          pos[i*3+2] += velbuf[i*3+2]*dt;
+        }
+        pts.material.opacity = Math.max(0, 1.0 - pts.userData.life/1.6);
+        pts.geometry.attributes.position.needsUpdate = true;
+        if (pts.userData.life>1.6){ scene.remove(pts); bursts.splice(bi,1); }
+      });
+    }
+
+    // ---------- Music (WebAudio tiny chiptune) ----------
+    let audioCtx = null;
+    let musicOn = true;
+    let musicNode = null;
+    function userAudioInit(){
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      startMusic();
+      muteBtn.textContent = '♪ Music ✓';
+    }
+    function startMusic(){
+      if (!audioCtx) return;
+      const ctx = audioCtx;
+      const out = ctx.createGain(); out.gain.value = 0.05; out.connect(ctx.destination);
+      const tempo = 110; const beat = 60/tempo;
+      const now = ctx.currentTime + 0.05;
+      const scale = [0,2,4,7,9,12,14]; // pentatonic-ish
+      function osc(t0, dur, note, type='square', gain=0.12){
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.type = type; o.frequency.value = 440 * Math.pow(2,(note-69)/12);
+        o.connect(g); g.connect(out);
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(gain, t0+0.01);
+        g.gain.linearRampToValueAtTime(0.0, t0+dur);
+        o.start(t0); o.stop(t0+dur+0.01);
+      }
+      // schedule 8-bar loop
+      const root = 69-12; // A3
+      for (let bar=0; bar<8; bar++){
+        const t = now + bar*4*beat;
+        const chord = [0, 7, 9][bar%3];
+        for (let s=0;s<8;s++){
+          const tNote = t + s*0.5*beat;
+          const idx = (s%scale.length);
+          const note = root + chord + scale[idx];
+          osc(tNote, 0.35*beat, note, s%4===0 ? 'triangle':'square', 0.10);
+          if (s%4===0) osc(tNote, 1.0*beat, note-12, 'sine', 0.06);
+        }
+      }
+      // reschedule
+      musicNode = setTimeout(()=>{ if (musicOn) startMusic(); }, 8*4*beat*1000);
+    }
+    muteBtn.addEventListener('click', ()=>{
+      musicOn = !musicOn;
+      muteBtn.textContent = musicOn ? '♪ Music ✓' : '♪ Music ✕';
+      if (!audioCtx) { userAudioInit(); return; }
+      if (musicOn){ startMusic(); } else { if (musicNode) clearTimeout(musicNode); }
+    });
+
+    // ---------- Animate ----------
+    const clock = new THREE.Clock();
+    const perf = { now: 0 };
+    startQuest();
+
+    function updateCarry(){
+      if (!carry) return;
+      // stick to player's satchel area
+      const up = getUp();
+      const right = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0,1,0)).normalize();
+      const fwd = new THREE.Vector3().crossVectors(right, up).normalize();
+      const anchor = player.position.clone().addScaledVector(up, 0.45).addScaledVector(right, -0.4).addScaledVector(fwd, -0.1);
+      carry.position.copy(anchor);
+      carry.material.opacity = 1.0;
+      carry.scale.setScalar(0.45 + Math.sin(perf.now*0.01)*0.02);
+    }
+
+    function animate(){
+      const dt = Math.min(0.033, clock.getDelta());
+      perf.now += dt*1000;
+
+      // keyboard input -> input.x/y
+      const upKey = keys['KeyW']||keys['ArrowUp']; const dnKey = keys['KeyS']||keys['ArrowDown'];
+      const lfKey = keys['KeyA']||keys['ArrowLeft']; const rtKey = keys['KeyD']||keys['ArrowRight'];
+      const ix = (rtKey?1:0) + (lfKey?-1:0);
+      const iy = (upKey?1:0) + (dnKey?-1:0);
+      if (!joyActive){
+        input.x = ix; input.y = iy;
+      }
+
+      pickupCircle.rotation.z += dt*1.2;
+      updatePhysics(dt);
+      updateCamera(dt);
+      updateParticles(dt);
+      updateCarry();
+
+      // wobble parcel at post office
+      if (activeParcel){
+        activeParcel.position.setLength(PLANET_R + 0.9 + Math.sin(perf.now*0.004)*0.05);
+        activeParcel.material.opacity = 0.8 + Math.sin(perf.now*0.006)*0.15;
+        activeParcel.scale.setScalar(0.6 + Math.sin(perf.now*0.006+1.0)*0.05);
+      }
+      if (targetSprite){
+        targetSprite.position.setLength(PLANET_R + 2.2 + Math.sin(perf.now*0.003)*0.1);
+      }
+
+      // render
+      composer.render();
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    // ---------- Resize ----------
+    function onResize(){
+      const w = container.clientWidth, h = container.clientHeight;
+      renderer.setSize(w,h); composer.setSize(w,h);
+      camera.aspect = w/h; camera.updateProjectionMatrix();
+      if (bokehPass){ bokehPass.setSize(w,h); }
+      bloom.setSize(w,h);
+    }
+    window.addEventListener('resize', onResize);
+
+    // ---------- Accessibility ----------
+    // Allow Enter to interact
+    window.addEventListener('keydown', (e)=>{ if (e.code==='Enter'){ tryInteract(); } });
+
+  </script>
+</body>
+</html>
