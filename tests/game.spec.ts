@@ -1,5 +1,14 @@
 import { expect, test, Page } from '@playwright/test';
 
+test.beforeEach(async ({ page }) => {
+  page.on('console', (msg) => {
+    console.log(`[console.${msg.type()}] ${msg.text()}`);
+  });
+  page.on('pageerror', (err) => {
+    console.log(`[pageerror] ${err.message ?? err}`);
+  });
+});
+
 async function waitForTestApi(page: Page) {
   await page.waitForFunction(() => Boolean((window as any).__GAME_TEST__), undefined, {
     timeout: 15_000
