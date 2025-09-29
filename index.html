@@ -1052,12 +1052,14 @@
         updateOrbitButton();
       });
 
-      // ---------- Simple physics on a sphere ----------
+      // ---------- Improved spherical physics ----------
       const vel = new THREE.Vector3(); // tangential
       let vRad = 0.0; // radial (jump)
       const accel = 9.5;
       const maxSpeed = 6.0;
-      const friction = 6.0;
+      // NEW: Improved friction balance for better speed control
+      const moveFriction = 2.0; // Lower friction when moving
+      const brakeFriction = 6.0; // Higher friction when stopping
       const airFriction = 8.0;
       const gravity = 9.8 + 0.3;
       let carry = null; // Sprite attached when carrying
@@ -1068,6 +1070,8 @@
       const accelVec = new THREE.Vector3();
       const orientForward = new THREE.Vector3();
       const heading = new THREE.Vector3(0, 0, 1);
+      // NEW: Store last input direction for stable orientation
+      const lastInputDir = new THREE.Vector3(0, 0, 1);
       const tmpVec = new THREE.Vector3();
       const debugCamDir = new THREE.Vector3();
       const tmpVec2 = new THREE.Vector3();
@@ -1115,86 +1119,103 @@
         dt = Math.min(dt, 1 / 60);
 
         // Get surface normal (always points away from planet center)
-        const up = player.position.clone().normalize();
+        const playerUp = player.position.clone().normalize();
 
         // Build stable tangent basis using camera direction
         camera.getWorldDirection(tmpVec);
-        buildSurfaceBasis(up, tmpVec, surfaceForward, surfaceRight);
+        buildSurfaceBasis(playerUp, tmpVec, surfaceForward, surfaceRight);
 
-        // Convert input to movement direction on surface
+        // NEW: Convert input to movement vector with analog magnitude preservation
         moveVec.set(0, 0, 0);
-        if (Math.abs(input.x) > 0.01)
-          moveVec.addScaledVector(surfaceRight, input.x);
-        if (Math.abs(input.y) > 0.01)
-          moveVec.addScaledVector(surfaceForward, input.y);
+        if (Math.abs(input.x) > 0.01) moveVec.addScaledVector(surfaceRight, input.x);
+        if (Math.abs(input.y) > 0.01) moveVec.addScaledVector(surfaceForward, input.y);
 
-        // Normalize movement vector
-        if (moveVec.lengthSq() > 0.01) {
-          moveVec.normalize();
+        // Allow analog magnitude: normalize only if length > 1 (diagonal clamp)
+        const moveLen = moveVec.length();
+        if (moveLen > 1e-6) {
+          if (moveLen > 1.0) {
+            moveVec.multiplyScalar(1.0 / moveLen); // scale down diagonal to unit length
+          }
+          // else: for 0 < moveLen <= 1, keep as is (preserve slower input magnitude)
         }
+        const inputMag = (moveLen > 1 ? 1 : moveLen); // 0 to 1
 
         // Current state
         const currentRadius = player.position.length();
         const targetRadius = PLANET_R + 0.5;
-        const grounded =
-          Math.abs(currentRadius - targetRadius) < 0.1 && vRad <= 0.1;
+        const grounded = Math.abs(currentRadius - targetRadius) < 0.1 && vRad <= 0.1;
 
-        // Handle jump
+        // NEW: Stronger jump impulse for visible lift
         if (input.jump && grounded) {
-          vRad = 3.2;
+          vRad = 5.5; // Increased from 3.2 for more visible jump
         }
         input.jump = false;
 
-        // Apply movement forces
-        accelVec.copy(moveVec).multiplyScalar(accel);
+        // NEW: Improved velocity integration with dynamic friction
+        const accelVec = moveVec.clone().multiplyScalar(accel);
         vel.addScaledVector(accelVec, dt);
 
-        // Apply friction
-        const frictionAmount = grounded ? friction : airFriction;
-        vel.multiplyScalar(Math.max(0, 1 - frictionAmount * dt));
+        // Apply dynamic friction based on input state
+        const moving = inputMag > 0.01;
+        const frictionCoef = grounded ? (moving ? moveFriction : brakeFriction) : airFriction;
+        vel.multiplyScalar(Math.max(0, 1 - frictionCoef * dt));
 
-        // Clamp speed
+        // Clamp to max speed
         const speed = vel.length();
         if (speed > maxSpeed) {
           vel.multiplyScalar(maxSpeed / speed);
         }
 
-        // SIMPLE SURFACE MOVEMENT - no coordinate conversion
+        // NEW: Move the player along the spherical surface using rotation
+        if (grounded && vel.lengthSq() > 1e-6) {
+          // Rotate position around axis perpendicular to movement
+          const upAxis = playerUp.clone();
+          const moveDir = vel.clone().normalize();
+          const rotAxis = new THREE.Vector3().crossVectors(upAxis, moveDir).normalize();
+          const angle = vel.length() * dt / currentRadius;
+          player.position.applyAxisAngle(rotAxis, angle);
+        } else {
+          // In air: no ground contact, so just move linearly (small error will be fixed on landing)
+          player.position.addScaledVector(vel, dt);
+        }
 
-        // Apply tangential movement directly
-        tmpVec.copy(vel).multiplyScalar(dt);
-        player.position.add(tmpVec);
-
-        // Handle radial physics (gravity + jump)
+        // NEW: Improved radial motion with gravity
         vRad -= gravity * dt;
 
-        // Constrain to surface radius
-        const newRadius = player.position.length();
-        const desiredRadius = targetRadius + vRad * dt;
-        const finalRadius = Math.max(desiredRadius, targetRadius);
+        // Compute proposed new radius after vertical movement
+        let proposedRadius = player.position.length() + vRad * dt;
 
-        // Landing check
-        if (finalRadius <= targetRadius && vRad < 0) {
+        // Landing check: if moving downward into ground
+        if (proposedRadius <= targetRadius && vRad < 0) {
+          // Land on ground
+          proposedRadius = targetRadius;
           vRad = 0;
         }
 
-        // Gently adjust to correct radius
-        player.position.normalize().multiplyScalar(finalRadius);
+        // Update player radius
+        player.position.normalize().multiplyScalar(proposedRadius);
 
         // Update velocity to stay tangent to new surface
         const newUp = player.position.clone().normalize();
         vel.projectOnPlane(newUp);
 
-        // orient player: up to normal, face velocity or look at post if nearly stopped
-        orientForward.copy(vel);
-        if (orientForward.lengthSq() > 0.0004) {
-          orientForward.normalize();
+        // NEW: Improved player orientation with stable facing direction
+        let faceDir = new THREE.Vector3();
+        if (inputMag > 0.01) {
+          // If player is providing input, face that direction (movement intent)
+          faceDir.copy(moveVec).normalize();
+          lastInputDir.copy(faceDir);
+        } else if (vel.lengthSq() > 1e-6) {
+          // No input but still moving (sliding), face velocity
+          faceDir.copy(vel).normalize();
+          lastInputDir.copy(faceDir);
         } else {
-          orientForward.copy(surfaceForward);
+          // No input and essentially not moving – keep previous facing direction
+          faceDir.copy(lastInputDir);
         }
-        heading.copy(orientForward);
-        tmpVec2.copy(orientForward);
-        lookMatrix.lookAt(origin, tmpVec2, up);
+
+        heading.copy(faceDir);
+        lookMatrix.lookAt(origin, faceDir, newUp);
         player.quaternion.setFromRotationMatrix(lookMatrix);
 
         if (physicsDebug) {
@@ -1206,7 +1227,7 @@
           const radius = player.position.length();
           const targetRadius = PLANET_R + 0.5;
           camera.getWorldDirection(debugCamDir);
-          const camF_dot_n = debugCamDir.dot(up);
+          const camF_dot_n = debugCamDir.dot(newUp);
           const anomalies = [];
 
           // Enhanced anomaly detection
@@ -1243,7 +1264,7 @@
             radiusErr: radius - targetRadius,
             camF_dot_n,
             grounded,
-            inputMag: inputMagnitude,
+            inputMag: inputMag,
             anomalies,
           });
         }
@@ -1271,27 +1292,33 @@
         cap.position.y = 0.24 + Math.sin(perf.now * 0.003 + 1.2) * 0.01;
       }
 
-      // ---------- Camera follow ----------
+      // ---------- Improved camera follow ----------
       function updateCamera(dt) {
-        const up = getUp();
-        tmpVec.copy(heading);
-        if (tmpVec.lengthSq() < 1e-6) {
-          const ref =
-            surfaceForward.lengthSq() > 0 ? surfaceForward : WORLD_FORWARD;
-          buildSurfaceBasis(up, ref, tmpVec, tmpVec2);
-        } else {
-          tmpVec.normalize();
+        const playerUp = getUp();
+        
+        // NEW: Set camera's up vector to player's up for proper horizon alignment
+        if (!controls.enabled) {
+          camera.up.copy(playerUp);
         }
-        tmpVec2.copy(tmpVec).multiplyScalar(-1);
-        desiredCamPos
-          .copy(player.position)
-          .addScaledVector(up, 2.0)
-          .addScaledVector(tmpVec2, 4.5);
+        
+        // Calculate desired camera position behind player
+        let camOffsetDir = heading.clone().multiplyScalar(-1); // opposite of facing
+        camOffsetDir = camOffsetDir.projectOnPlane(playerUp).normalize(); // ensure it's in tangent plane
+        
+        desiredCamPos.copy(player.position)
+          .addScaledVector(playerUp, 2.0)    // 2 units above player
+          .addScaledVector(camOffsetDir, 4.5); // 4.5 units behind player
+        
+        // Smoothly move camera
         camera.position.lerp(desiredCamPos, 1.0 - Math.pow(0.0001, dt));
-        lookTarget.copy(player.position).addScaledVector(up, 0.4);
+        
+        // Look at a point slightly above the player for a better view angle
+        lookTarget.copy(player.position).addScaledVector(playerUp, 0.4);
         camera.lookAt(lookTarget);
+        
         controls.target.copy(player.position);
         controls.update();
+        
         if (bokehPass) {
           bokehPass.materialBokeh.uniforms["focus"].value =
             camera.position.distanceTo(player.position) + 6.0;
